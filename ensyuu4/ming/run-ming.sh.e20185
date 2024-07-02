@@ -1,0 +1,2 @@
+OMP_NUM_THREADS=16 /home/students/u222c1021/ming 20 1.07 0.7 12
+/var/spool/pbs/mom_priv/jobs/20185.ryzen0.SC: line 3: /home/students/u222c1021/ming: No such file or directory
