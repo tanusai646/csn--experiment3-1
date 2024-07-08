@@ -27,6 +27,8 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 	while (ii < maxi){
       // 加速度ベクトルとその勾配を総和
 		size_t i;
+		//並列化処理
+		#pragma omp parallel for private(i) reduction(+:accelx) reduction(+:accely) reduction(+:derivxx) reduction(+:derivxy) reduction(+:derivyy)
 		for (i = 0; i < sz; i++){
 			double x = data[i].x - x0, y = data[i].y - y0;
 			double x2 = x * x, y2 = y * y;
@@ -100,7 +102,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		}
 		// u2, nr2 によって次の反復は実行せずに打ち切るか決める
 		if (nr2 > 1.0 || u2 < 1e-20)
-		break;
+			break;
 		}
 	*xp = x0; *yp = y0;
 	return ii;
@@ -117,7 +119,7 @@ static int get_vals(double *val1, double *val2, double x0, double y0, struct xy 
 	size_t i;
 
 	/*ここで並列化処理*/
-	#pragma omp parallel reduction(+:poten) reduction(+:accelx) reduction(+:accely)
+	#pragma omp parallel for private(i) reduction(+:poten) reduction(+:accelx) reduction(+:accely)
 	for (i = 0; i < sz; i++){
 		double x = data[i].x - x0;
 		double y = data[i].y - y0;
@@ -203,12 +205,13 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	int r = data_ans_to_png_img(stdout, x1, y1, c, ssz, b, ssz, data, sz);
 	// 近傍の点を表示
 	size_t i;
+	//並列処理
+	#pragma omp parallel for private(i, x1, y1)
 	for (i = 0; i < sz; i++){
-		double r2 = (data[i].x - x1) * (data[i].x - x1)
-		+ (data[i].y - y1) * (data[i].y - y1);
-		if (r2 < 0.0001)
-		fprintf(stderr, "neib: %f, %f dist: %f\n",
-			data[i].x, data[i].y, sqrt(r2));
+		double r2 = (data[i].x - x1) * (data[i].x - x1) + (data[i].y - y1) * (data[i].y - y1);
+		if (r2 < 0.0001){
+			fprintf(stderr, "neib: %f, %f dist: %f\n", data[i].x, data[i].y, sqrt(r2));
+		}
 	}
 	free(c);
 	free(b);

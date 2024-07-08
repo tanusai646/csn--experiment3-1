@@ -1,2 +1,0 @@
-OMP_NUM_THREADS=16 /home/students/u222c1021/ming-mp 20 1.07 0.7 12
-/var/spool/pbs/mom_priv/jobs/20186.ryzen0.SC: line 3: /home/students/u222c1021/enssyuu/ensyuu4/ming-mp: No such file or directory
