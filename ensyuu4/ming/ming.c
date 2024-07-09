@@ -175,7 +175,8 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
 			// できるだけ改良
 			int ii = improve(&x0, &y0, 100, data, sz);
-			c[i0].x = x0; c[i0].y = y0;
+			c[i0].x = x0; 
+			c[i0].y = y0;
 			get_vals(&val1, &val2, x0, y0, data, sz);
 			val = val1 + val2 * 1.0;
 			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
@@ -221,7 +222,7 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	free(c);
 	free(b);
 	return r;
-	}
+}
 
 int main(int argc, char *argv[]) {
 	size_t sz = 0;
