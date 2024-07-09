@@ -8,11 +8,11 @@
 #define EPARAM 1e-40
 
 ////////////////////////////////////////
-
 /*
   候補位置 (*xp, *yp) をできるだけ改良．改良した回数を返す．最大 maxi回改良
   ポテンシャルは使わず，加速度が0になるところを目指す
 */
+
 int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 	// 候補位置
 	double x0 = *xp, y0 = *yp;
@@ -28,7 +28,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
       // 加速度ベクトルとその勾配を総和
 		size_t i;
 		//並列化処理
-		#pragma omp parallel for private(i) reduction(+:accelx) reduction(+:accely) reduction(+:derivxx) reduction(+:derivxy) reduction(+:derivyy)
+		#pragma omp parallel for reduction(+:accelx) reduction(+:accely) reduction(+:derivxx) reduction(+:derivxy) reduction(+:derivyy)
 		for (i = 0; i < sz; i++){
 			double x = data[i].x - x0, y = data[i].y - y0;
 			double x2 = x * x, y2 = y * y;
@@ -49,8 +49,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 #if 0
 		fprintf(stderr, "pos=(%f,%f) on %d\n", x0, y0, ii);
 		fprintf(stderr, "accel=(%f,%f) on %d\n", accelx, accely, ii);
-		fprintf(stderr, "deriv=(%f,%f,%f) on %d\n",
-			derivxx, derivxy, derivyy, ii);
+		fprintf(stderr, "deriv=(%f,%f,%f) on %d\n", derivxx, derivxy, derivyy, ii);
 #endif
 		// 2x2 ヘッセ行列: a, b, c, d
 		double a = derivxx, b = derivxy, c = derivxy, d = derivyy;
@@ -119,7 +118,7 @@ static int get_vals(double *val1, double *val2, double x0, double y0, struct xy 
 	size_t i;
 
 	/*ここで並列化処理*/
-	#pragma omp parallel for private(i) reduction(+:poten) reduction(+:accelx) reduction(+:accely)
+	#pragma omp parallel for reduction(+:poten) reduction(+:accelx) reduction(+:accely)
 	for (i = 0; i < sz; i++){
 		double x = data[i].x - x0;
 		double y = data[i].y - y0;
@@ -156,7 +155,10 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	struct xy *c = (struct xy *)calloc(ssz, sizeof(struct xy)); // 改良後
 	if (c == 0) return -2;
 	int i0;
-	for (i0 = 0; i0 < ssz; i0++) // 各候補位置について
+
+	//並列化処理
+	#pragma omp parallel for
+	for (i0 = 0; i0 < ssz; i0++){ // 各候補位置について
 		if (judge_gettime() < MY_TIME_LIMIT){ // 時間が残っていれば処理
 			double ss = ss0 + ssa * i0;
 			ss = ss - (long long)ss;
@@ -165,22 +167,25 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 			// 中心から方向を表す単位ベクトル (xkey1, ykey1)
 			double xkey1 = cos(key1 * i0), ykey1 = sin(key1 * i0);
 			double x0 = rr * xkey1, y0 = rr * ykey1; // 候補位置 (距離，方向)
-			b[i0].x = x0; b[i0].y = y0; // 表示用
+			b[i0].x = x0; 
+			b[i0].y = y0; // 表示用
 			double val1, val2;
 			get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
 			double val = val1 + val2 * 1.0;
-			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n",
-				i0, x0, y0, val, val1, val2); // 初期評価値を表示
+			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
 			// できるだけ改良
 			int ii = improve(&x0, &y0, 100, data, sz);
 			c[i0].x = x0; c[i0].y = y0;
 			get_vals(&val1, &val2, x0, y0, data, sz);
 			val = val1 + val2 * 1.0;
-			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n",
-				i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+			//重複させたくない処理
+			#pragma	omp critical
+			//#pragma omp single //←失敗
 			{ // これまでより良い評価なら，最良値の情報を更新
 				if (val < minval) {
-					x1 = x0; y1 = y0;
+					x1 = x0; 
+					y1 = y0;
 					minval = val;
 					fprintf(stderr, "!:%d\n", i0);
 				}
@@ -190,6 +195,7 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 				}
 			}
 		}
+	}
 	// 仕上げ
 	improve(&x1, &y1, 3, data, sz);
 	// まず審判に報告
@@ -199,14 +205,13 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	double val1, val2;
 	get_vals(&val1, &val2, x1, y1, data, sz);
 	double val = val1 + val2 * 1.0;
-	fprintf(stderr, "min: (%f, %f) with %f %f %f\n",
-		x1, y1, val, val1, val2);
+	fprintf(stderr, "min: (%f, %f) with %f %f %f\n", x1, y1, val, val1, val2);
 	// PNG 生成 とりあえず標準出力に (ファイルをfopenする手もあるが)
 	int r = data_ans_to_png_img(stdout, x1, y1, c, ssz, b, ssz, data, sz);
 	// 近傍の点を表示
 	size_t i;
 	//並列処理
-	#pragma omp parallel for private(i, x1, y1)
+	#pragma omp parallel for
 	for (i = 0; i < sz; i++){
 		double r2 = (data[i].x - x1) * (data[i].x - x1) + (data[i].y - y1) * (data[i].y - y1);
 		if (r2 < 0.0001){
@@ -216,7 +221,7 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	free(c);
 	free(b);
 	return r;
-}
+	}
 
 int main(int argc, char *argv[]) {
 	size_t sz = 0;
