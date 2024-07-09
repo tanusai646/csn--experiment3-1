@@ -71,13 +71,13 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 以下は，更新のステップサイズ(学習率)を1未満とする場合分け
 		// 問題サイズ(sz)が 2^20 の場合をある程度想定
 		if (u2 > 1e-2){
-			ux *= 0.05; uy *= 0.05; // 更新量制限
+			ux *= 0.01; uy *= 0.01; // 更新量制限
 		} else if (u2 > 1e-4) {	      
 			ux *= 0.1; uy *= 0.1; // 更新量制限
 		} else if (u2 > 1e-5) {	      
-			ux *= 0.2; uy *= 0.2; // 更新量制限
+			ux *= 0.3; uy *= 0.3; // 更新量制限
 		} else if (u2 > 1e-6) {	      
-			ux *= 0.4; uy *= 0.4; // 更新量制限
+			ux *= 0.6; uy *= 0.6; // 更新量制限
 		}
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2
