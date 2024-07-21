@@ -58,7 +58,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 行列式を用いて，逆行列を扱う
 		double det = a * d - b * c;
 
-		if(feds(det) < 1e-20){
+		if(fads(det) < 1e-20){
 			det = (det < 0 ? -1 : 1) * 1e-20;
 		}
 
