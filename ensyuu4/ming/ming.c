@@ -15,25 +15,41 @@
 static int get_vals(double *val1, double *val2, double x0, double y0, struct xy *data, size_t sz){
 	double poten = 0.0;
 	double accelx = 0.0, accely = 0.0;
-	size_t i;
 
-	/*ここで並列化処理*/
-	#pragma omp parallel for reduction(+:poten) reduction(+:accelx) reduction(+:accely)
-	for (i = 0; i < sz; i++){
-		double x = data[i].x - x0;
-		double y = data[i].y - y0;
-		double x2 = x * x;
-		double y2 = y * y;
-		double r2 = x2 + y2 + EPARAM;
-		double r_2 = 1.0 / r2;
-		double r_1 = sqrt(r_2);
-		double r_3 = r_1 * r_2;
-		// 重力ポテンシャルの総和
-		poten += r_1;
-		// 加速度ベクトルの総和
-		accelx += r_3 * x;
-		accely += r_3 * y;
-	}
+	//並列化
+    #pragma omp parallel
+    {
+        double local_poten = 0.0;
+        double local_accelx = 0.0;
+        double local_accely = 0.0;
+
+        #pragma omp for nowait
+        for (size_t i = 0; i < sz; i++) {
+            double x = data[i].x - x0;
+            double y = data[i].y - y0;
+            double x2 = x * x;
+            double y2 = y * y;
+            double r2 = x2 + y2 + EPARAM;
+            double r_2 = 1.0 / r2;
+            double r_1 = sqrt(r_2);
+            double r_3 = r_1 * r_2;
+
+            // 重力ポテンシャルの総和
+            local_poten += r_1;
+            // 加速度ベクトルの総和
+            local_accelx += r_3 * x;
+            local_accely += r_3 * y;
+        }
+
+        // スレッドごとに計算した結果を集約
+        #pragma omp atomic
+        poten += local_poten;
+        #pragma omp atomic
+        accelx += local_accelx;
+        #pragma omp atomic
+        accely += local_accely;
+    }
+
 	*val1 = poten / sz;
 	*val2 = sqrt(accelx * accelx + accely * accely) / sz;
 	return 0;
@@ -62,24 +78,42 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 
 	while (ii < maxi){
       // 加速度ベクトルとその勾配を総和
-		size_t i;
-		//並列化処理
-		#pragma omp parallel for reduction(+:accelx) reduction(+:accely) reduction(+:derivxx) reduction(+:derivxy) reduction(+:derivyy)
-		for (i = 0; i < sz; i++){
-			double x = data[i].x - x0, y = data[i].y - y0;
-			double x2 = x * x, y2 = y * y;
-			double r2 = x2 + y2 + EPARAM;
-			double r_2 = 1.0 / r2;
-			double r_1 = sqrt(r_2);
-			double r_3 = r_1 * r_2;
-			// 加速度ベクトルの総和
-			accelx += r_3 * x;
-			accely += r_3 * y;
-			// 加速度ベクトルの勾配の総和
-			derivxx += 3.0 * r_3 * (x2 * r_2 - 1.0 / 3.0);
-			derivxy += 3.0 * r_3 * x * y * r_2;
-			derivyy += 3.0 * r_3 * (y2 * r_2 - 1.0 / 3.0);
-		}
+	#pragma omp parallel
+        {
+            // 各スレッドのローカル変数を定義
+            double local_accelx = 0.0, local_accely = 0.0;
+            double local_derivxx = 0.0, local_derivxy = 0.0, local_derivyy = 0.0;
+
+            #pragma omp for
+            for (size_t i = 0; i < sz; i++) {
+                double x = data[i].x - x0;
+                double y = data[i].y - y0;
+                double x2 = x * x;
+                double y2 = y * y;
+                double r2 = x2 + y2 + EPARAM;
+                double r_2 = 1.0 / r2;
+                double r_1 = sqrt(r_2);
+                double r_3 = r_1 * r_2;
+
+                // 加速度ベクトルの総和
+                local_accelx += r_3 * x;
+                local_accely += r_3 * y;
+
+                // 加速度ベクトルの勾配の総和
+                local_derivxx += 3.0 * r_3 * (x2 * r_2 - 1.0 / 3.0);
+                local_derivxy += 3.0 * r_3 * x * y * r_2;
+                local_derivyy += 3.0 * r_3 * (y2 * r_2 - 1.0 / 3.0);
+            }
+
+            #pragma omp critical
+            {
+                accelx += local_accelx;
+                accely += local_accely;
+                derivxx += local_derivxx;
+                derivxy += local_derivxy;
+                derivyy += local_derivyy;
+            }
+        }
       // x0, y0 を更新．u2, nr2 によって打ち切るか決められるようにする
     	{
 #if 0
@@ -133,7 +167,8 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		if (nr2 > 1.0) { 
 			// 系の枠外 (中心からの距離が1を超える) なら，枠内ぎりぎりに
 			double nr_1 = sqrt(1.0 / nr2);
-			x0 = nx * nr_1; y0 = ny * nr_1;
+			x0 = nx * nr_1; 
+			y0 = ny * nr_1;
 		}
 		// 次の反復へ． 
 		ii++;
@@ -148,6 +183,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		if (nr2 > 1.0 || u2 < 1e-20){
 			break;
 		}
+		
 		//早期に終了させる処理
 		double val1, val2;
         get_vals(&val1, &val2, x0, y0, data, sz);
@@ -157,7 +193,9 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
         prev_val1 = val1;
         prev_val2 = val2;
 	}
-	*xp = x0; *yp = y0;
+
+	*xp = x0; 
+	*yp = y0;
 	return ii;
 }
 
@@ -195,14 +233,14 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 			double val1, val2;
 			get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
 			double val = val1 + val2 * 1.0;
-			//fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
 			// できるだけ改良
 			int ii = improve(&x0, &y0, 100, data, sz);
 			c[i0].x = x0; 
 			c[i0].y = y0;
 			get_vals(&val1, &val2, x0, y0, data, sz);
 			val = val1 + val2 * 1.0;
-			//fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
 			//重複させたくない処理
 			#pragma	omp critical
 			//#pragma omp single //←失敗
