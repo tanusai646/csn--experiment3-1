@@ -55,11 +55,17 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		double a = derivxx, b = derivxy, c = derivxy, d = derivyy;
 		// 行列式を用いて，逆行列を扱う
 		double det = a * d - b * c;
+
+		if(fabs(det) < 1e-20){
+			det = (det < 0 ? -1 : 1) * 1e-20;
+		}
+		/*
 		if (det > 0){
 			if (det < 1e-20) det = 1e-20;
 		} else { 
 			if (det > - 1e-20) det = - 1e-20; 
 		}
+		*/
 		// 加速度の総和を0にするための更新量を求める (ニュートン法)
 		double ux = - 1.0 / det * (  d * accelx - b * accely);
 		double uy = - 1.0 / det * (- c * accelx + a * accely);
@@ -172,14 +178,14 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 			double val1, val2;
 			get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
 			double val = val1 + val2 * 1.0;
-			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+			//fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
 			// できるだけ改良
 			int ii = improve(&x0, &y0, 100, data, sz);
 			c[i0].x = x0; 
 			c[i0].y = y0;
 			get_vals(&val1, &val2, x0, y0, data, sz);
 			val = val1 + val2 * 1.0;
-			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+			//fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
 			//重複させたくない処理
 			#pragma	omp critical
 			//#pragma omp single //←失敗
