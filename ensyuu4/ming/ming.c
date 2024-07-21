@@ -104,17 +104,22 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 #endif
 		// 更新量の大きさ^2
 		u2 = ux * ux + uy * uy;
-		// 以下は，更新のステップサイズ(学習率)を1未満とする場合分け
-		// 問題サイズ(sz)が 2^20 の場合をある程度想定
-        if (u2 > 1e-2){
-            ux *= 0.01; uy *= 0.01;
-        } else if (u2 > 1e-4) {      
-            ux *= 0.1; uy *= 0.1;
-        } else if (u2 > 1e-5) {      
-            ux *= 0.3; uy *= 0.3;
-        } else if (u2 > 1e-6) {      
-            ux *= 0.6; uy *= 0.6;
-        }
+
+		// ステップサイズのスケーリングファクタを計算
+		// ステップサイズは u2 の逆数に基づいて調整します
+		// ここではスケーリングファクタとして1.0 / sqrt(u2)を使います
+		double scale = 1.0 / sqrt(u2);
+
+		// ステップサイズをスケーリングファクタに基づいて調整します
+		// 制限を設けることで、ステップサイズがあまり大きくならないようにします
+		double max_step = 0.6; // 最大ステップサイズ
+		if (scale > max_step) {
+			scale = max_step;
+		}
+
+		ux *= scale;
+		uy *= scale;
+
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2
 		nr2 = nx * nx + ny * ny;
