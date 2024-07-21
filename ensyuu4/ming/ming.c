@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <omp.h>
 #include "judge.h"
 #include "mypng.h"
 
@@ -24,11 +25,12 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 	double u2, nr2;
 	// 改良用反復の番号
 	int ii = 0;
+
 	while (ii < maxi){
-      // 加速度ベクトルとその勾配を総和
+      	// 加速度ベクトルとその勾配を総和
 		size_t i;
 		//並列化処理
-		#pragma omp parallel for reduction(+:accelx) reduction(+:accely) reduction(+:derivxx) reduction(+:derivxy) reduction(+:derivyy)
+		#pragma omp parallel for reduction(+:accelx, accely, derivxx, derivxy, derivyy)
 		for (i = 0; i < sz; i++){
 			double x = data[i].x - x0, y = data[i].y - y0;
 			double x2 = x * x, y2 = y * y;
@@ -55,11 +57,19 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		double a = derivxx, b = derivxy, c = derivxy, d = derivyy;
 		// 行列式を用いて，逆行列を扱う
 		double det = a * d - b * c;
+
+		if(feds(det) < 1e-20){
+			det = (det < 0 ? -1 : 1) * 1e-20;
+		}
+
+		//元のプログラム
+		/*
 		if (det > 0){
 			if (det < 1e-20) det = 1e-20;
 		} else { 
 			if (det > - 1e-20) det = - 1e-20; 
 		}
+		*/
 		// 加速度の総和を0にするための更新量を求める (ニュートン法)
 		double ux = - 1.0 / det * (  d * accelx - b * accely);
 		double uy = - 1.0 / det * (- c * accelx + a * accely);
@@ -71,13 +81,17 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 以下は，更新のステップサイズ(学習率)を1未満とする場合分け
 		// 問題サイズ(sz)が 2^20 の場合をある程度想定
 		if (u2 > 1e-2){
-			ux *= 0.01; uy *= 0.01; // 更新量制限
+			ux *= 0.05; 
+			uy *= 0.05; // 更新量制限
 		} else if (u2 > 1e-4) {	      
-			ux *= 0.1; uy *= 0.1; // 更新量制限
+			ux *= 0.1; 
+			uy *= 0.1; // 更新量制限
 		} else if (u2 > 1e-5) {	      
-			ux *= 0.3; uy *= 0.3; // 更新量制限
+			ux *= 0.2; 
+			uy *= 0.2; // 更新量制限
 		} else if (u2 > 1e-6) {	      
-			ux *= 0.6; uy *= 0.6; // 更新量制限
+			ux *= 0.4; 
+			uy *= 0.4; // 更新量制限
 		}
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2
@@ -87,23 +101,30 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		double pay = accely + c * (nx - x0) + d * (ny - y0);
 		fprintf(stderr, "accelp=(%f,%f)\n", pax, pay);
 #endif
-		x0 = nx; y0 = ny;
+		x0 = nx; 
+		y0 = ny;
 		if (nr2 > 1.0) { 
 			// 系の枠外 (中心からの距離が1を超える) なら，枠内ぎりぎりに
 			double nr_1 = sqrt(1.0 / nr2);
-			x0 = nx * nr_1; y0 = ny * nr_1;
+			x0 = nx * nr_1; 
+			y0 = ny * nr_1;
 		}
 		// 次の反復へ． 
 		ii++;
 		// 次の反復で加速度ベクトルとその勾配を求める準備
-		accelx = 0.0; accely = 0.0;
-		derivxx = 0.0; derivxy = 0.0; derivyy = 0.0;
+		accelx = 0.0; 
+		accely = 0.0;
+		derivxx = 0.0; 
+		derivxy = 0.0; 
+		derivyy = 0.0;
 		}
 		// u2, nr2 によって次の反復は実行せずに打ち切るか決める
 		if (nr2 > 1.0 || u2 < 1e-20)
 			break;
 		}
-	*xp = x0; *yp = y0;
+
+	*xp = x0; 
+	*yp = y0;
 	return ii;
 }
 
@@ -118,7 +139,7 @@ static int get_vals(double *val1, double *val2, double x0, double y0, struct xy 
 	size_t i;
 
 	/*ここで並列化処理*/
-	#pragma omp parallel for reduction(+:poten) reduction(+:accelx) reduction(+:accely)
+	#pragma omp parallel for reduction(+:poten, accelx, accely)
 	for (i = 0; i < sz; i++){
 		double x = data[i].x - x0;
 		double y = data[i].y - y0;
@@ -134,6 +155,7 @@ static int get_vals(double *val1, double *val2, double x0, double y0, struct xy 
 		accelx += r_3 * x;
 		accely += r_3 * y;
 	}
+
 	*val1 = poten / sz;
 	*val2 = sqrt(accelx * accelx + accely * accely) / sz;
 	return 0;
@@ -150,12 +172,77 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	double minval = 1e+50;     // これまで最良の評価値
 	double minval1 = 1e+50;    // これまで最良の評価値1
 	double x1 = 0.0, y1 = 0.0; // これまで最良の位置
+
+	double totaltime = 0.0;		//計測時間
+	int ii = 0;
 	struct xy *b = (struct xy *)calloc(ssz, sizeof(struct xy)); // 改良前
-	if (b == 0) return -2;
+	if (b == 0) {
+		return -2;
+	}
 	struct xy *c = (struct xy *)calloc(ssz, sizeof(struct xy)); // 改良後
-	if (c == 0) return -2;
+	if (c == 0) {
+		return -2;
+	}
 	int i0;
 
+	//追加した部分
+	for(size_t ix=0; ix < ssz; ix++){
+		double x0 = ss0 * cos(ssa * ix);
+		double y0 = ss0 * sin(ssa * ix);
+		b[ix].x = x0;
+		b[ix].y = y0;
+	}
+
+	int improved;
+
+	while(totaltime < MY_TIME_LIMIT){
+		double st = omp_get_wtime();
+
+		// 並列化処理
+        #pragma omp parallel for
+        for (size_t i = 0; i < ssz; i++) {
+            c[i].x = b[i].x;
+            c[i].y = b[i].y;
+            improved = improve(&c[i].x, &c[i].y, 500, data, sz);
+        }
+
+		// 評価値を求める
+        #pragma omp parallel for reduction(min:minval,minval1)
+        for (size_t i = 0; i < ssz; i++) {
+            double val1, val2;
+            get_vals(&val1, &val2, c[i].x, c[i].y, data, sz);
+            double val = fabs(val1 - key1) + fabs(val2 - key2);
+            if (val < minval) {
+                minval = val;
+                minval1 = val1;
+                x1 = c[i].x;
+                y1 = c[i].y;
+            }
+        }
+
+		double et = omp_get_wtime();
+		totaltime += et - st;
+		ii++;
+		// 改良後の位置を改良前の位置とする
+        #pragma omp parallel for
+        for (size_t i = 0; i < ssz; i++) {
+            b[i].x = c[i].x;
+            b[i].y = c[i].y;
+        }
+        // 改善が少ない場合はループを終了する
+        if (improved < 1)
+            break;
+    }
+
+	free(b);
+	free(c);
+
+	return ii;
+
+
+
+	//元のプログラム
+	/*
 	//並列化処理
 	#pragma omp parallel for
 	for (i0 = 0; i0 < ssz; i0++){ // 各候補位置について
@@ -172,14 +259,14 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 			double val1, val2;
 			get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
 			double val = val1 + val2 * 1.0;
-			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+			//fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
 			// できるだけ改良
 			int ii = improve(&x0, &y0, 100, data, sz);
 			c[i0].x = x0; 
 			c[i0].y = y0;
 			get_vals(&val1, &val2, x0, y0, data, sz);
 			val = val1 + val2 * 1.0;
-			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+			//fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
 			//重複させたくない処理
 			#pragma	omp critical
 			//#pragma omp single //←失敗
@@ -222,6 +309,7 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	free(c);
 	free(b);
 	return r;
+	*/
 }
 
 int main(int argc, char *argv[]) {
