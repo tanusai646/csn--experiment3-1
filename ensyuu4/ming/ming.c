@@ -139,20 +139,13 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 更新量の大きさ^2
 		u2 = ux * ux + uy * uy;
 
-		// ステップサイズのスケーリングファクタを計算
-		// ステップサイズは u2 の逆数に基づいて調整します
-		// ここではスケーリングファクタとして1.0 / sqrt(u2)を使います
-		double scale = 1.0 / sqrt(u2);
+        // ステップサイズのスケーリングファクタを計算
+        double scale = 1.0 / sqrt(u2);
+        double max_step = 0.1; // 最大ステップサイズを設定
 
-		// ステップサイズをスケーリングファクタに基づいて調整します
-		// 制限を設けることで、ステップサイズがあまり大きくならないようにします
-		double max_step = 0.6; // 最大ステップサイズ
-		if (scale > max_step) {
-			scale = max_step;
-		}
-
-		ux *= scale;
-		uy *= scale;
+        if (scale > max_step) {
+            scale = max_step;
+        }
 
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2
