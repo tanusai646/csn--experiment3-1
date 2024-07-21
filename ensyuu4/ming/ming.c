@@ -8,6 +8,39 @@
 #define EPARAM 1e-40
 
 ////////////////////////////////////////
+// 評価値を計算 (どちらも正となるように符号を考える)
+//   評価値1: 重力ポテンシャル(の総和)/総質量
+//   評価値2: 重力加速度(の総和)の絶対値/総質量 × 系の半径
+
+static int get_vals(double *val1, double *val2, double x0, double y0, struct xy *data, size_t sz){
+	double poten = 0.0;
+	double accelx = 0.0, accely = 0.0;
+	size_t i;
+
+	/*ここで並列化処理*/
+	#pragma omp parallel for reduction(+:poten) reduction(+:accelx) reduction(+:accely)
+	for (i = 0; i < sz; i++){
+		double x = data[i].x - x0;
+		double y = data[i].y - y0;
+		double x2 = x * x;
+		double y2 = y * y;
+		double r2 = x2 + y2 + EPARAM;
+		double r_2 = 1.0 / r2;
+		double r_1 = sqrt(r_2);
+		double r_3 = r_1 * r_2;
+		// 重力ポテンシャルの総和
+		poten += r_1;
+		// 加速度ベクトルの総和
+		accelx += r_3 * x;
+		accely += r_3 * y;
+	}
+	*val1 = poten / sz;
+	*val2 = sqrt(accelx * accelx + accely * accely) / sz;
+	return 0;
+}
+
+
+////////////////////////////////////////
 /*
   候補位置 (*xp, *yp) をできるだけ改良．改良した回数を返す．最大 maxi回改良
   ポテンシャルは使わず，加速度が0になるところを目指す
@@ -24,6 +57,9 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 	double u2, nr2;
 	// 改良用反復の番号
 	int ii = 0;
+	//
+	double prev_val1 = 1e50, prev_val2 = 1e50;
+
 	while (ii < maxi){
       // 加速度ベクトルとその勾配を総和
 		size_t i;
@@ -59,13 +95,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		if(fabs(det) < 1e-20){
 			det = (det < 0 ? -1 : 1) * 1e-20;
 		}
-		/*
-		if (det > 0){
-			if (det < 1e-20) det = 1e-20;
-		} else { 
-			if (det > - 1e-20) det = - 1e-20; 
-		}
-		*/
+
 		// 加速度の総和を0にするための更新量を求める (ニュートン法)
 		double ux = - 1.0 / det * (  d * accelx - b * accely);
 		double uy = - 1.0 / det * (- c * accelx + a * accely);
@@ -76,15 +106,15 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		u2 = ux * ux + uy * uy;
 		// 以下は，更新のステップサイズ(学習率)を1未満とする場合分け
 		// 問題サイズ(sz)が 2^20 の場合をある程度想定
-		if (u2 > 1e-2){
-			ux *= 0.01; uy *= 0.01; // 更新量制限
-		} else if (u2 > 1e-4) {	      
-			ux *= 0.1; uy *= 0.1; // 更新量制限
-		} else if (u2 > 1e-5) {	      
-			ux *= 0.3; uy *= 0.3; // 更新量制限
-		} else if (u2 > 1e-6) {	      
-			ux *= 0.6; uy *= 0.6; // 更新量制限
-		}
+        if (u2 > 1e-2){
+            ux *= 0.01; uy *= 0.01;
+        } else if (u2 > 1e-4) {      
+            ux *= 0.1; uy *= 0.1;
+        } else if (u2 > 1e-5) {      
+            ux *= 0.3; uy *= 0.3;
+        } else if (u2 > 1e-6) {      
+            ux *= 0.6; uy *= 0.6;
+        }
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2
 		nr2 = nx * nx + ny * ny;
@@ -93,7 +123,8 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		double pay = accely + c * (nx - x0) + d * (ny - y0);
 		fprintf(stderr, "accelp=(%f,%f)\n", pax, pay);
 #endif
-		x0 = nx; y0 = ny;
+		x0 = nx; 
+		y0 = ny;
 		if (nr2 > 1.0) { 
 			// 系の枠外 (中心からの距離が1を超える) なら，枠内ぎりぎりに
 			double nr_1 = sqrt(1.0 / nr2);
@@ -102,48 +133,29 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 次の反復へ． 
 		ii++;
 		// 次の反復で加速度ベクトルとその勾配を求める準備
-		accelx = 0.0; accely = 0.0;
-		derivxx = 0.0; derivxy = 0.0; derivyy = 0.0;
+		accelx = 0.0; 
+		accely = 0.0;
+		derivxx = 0.0; 
+		derivxy = 0.0; 
+		derivyy = 0.0;
 		}
 		// u2, nr2 によって次の反復は実行せずに打ち切るか決める
-		if (nr2 > 1.0 || u2 < 1e-20)
+		if (nr2 > 1.0 || u2 < 1e-20){
 			break;
 		}
+		//早期に終了させる処理
+		double val1, val2;
+        get_vals(&val1, &val2, x0, y0, data, sz);
+        if (fabs(val1 - prev_val1) < 1e-6 && fabs(val2 - prev_val2) < 1e-6) {
+            break;  // Early stopping if improvement is very small
+        }
+        prev_val1 = val1;
+        prev_val2 = val2;
+	}
 	*xp = x0; *yp = y0;
 	return ii;
 }
 
-////////////////////////////////////////
-// 評価値を計算 (どちらも正となるように符号を考える)
-//   評価値1: 重力ポテンシャル(の総和)/総質量
-//   評価値2: 重力加速度(の総和)の絶対値/総質量 × 系の半径
-
-static int get_vals(double *val1, double *val2, double x0, double y0, struct xy *data, size_t sz){
-	double poten = 0.0;
-	double accelx = 0.0, accely = 0.0;
-	size_t i;
-
-	/*ここで並列化処理*/
-	#pragma omp parallel for reduction(+:poten) reduction(+:accelx) reduction(+:accely)
-	for (i = 0; i < sz; i++){
-		double x = data[i].x - x0;
-		double y = data[i].y - y0;
-		double x2 = x * x;
-		double y2 = y * y;
-		double r2 = x2 + y2 + EPARAM;
-		double r_2 = 1.0 / r2;
-		double r_1 = sqrt(r_2);
-		double r_3 = r_1 * r_2;
-		// 重力ポテンシャルの総和
-		poten += r_1;
-		// 加速度ベクトルの総和
-		accelx += r_3 * x;
-		accely += r_3 * y;
-	}
-	*val1 = poten / sz;
-	*val2 = sqrt(accelx * accelx + accely * accely) / sz;
-	return 0;
-}
 
 // 時間制限を満たすために処理をスキップするかの判断のため
 #define MY_TIME_LIMIT 28.2
