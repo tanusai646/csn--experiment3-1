@@ -183,7 +183,7 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		if (nr2 > 1.0 || u2 < 1e-20){
 			break;
 		}
-		
+
 		//早期に終了させる処理
 		double val1, val2;
         get_vals(&val1, &val2, x0, y0, data, sz);
@@ -218,43 +218,61 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	int i0;
 
 	//並列化処理
-	#pragma omp parallel for
-	for (i0 = 0; i0 < ssz; i0++){ // 各候補位置について
-		if (judge_gettime() < MY_TIME_LIMIT){ // 時間が残っていれば処理
-			double ss = ss0 + ssa * i0;
-			ss = ss - (long long)ss;
-			ss = ss - (int)ss;    // 小数部分を残す (0から1)
-			double rr = sqrt(ss); // 中心からの距離，密度(面積あたり)を一定に
-			// 中心から方向を表す単位ベクトル (xkey1, ykey1)
-			double xkey1 = cos(key1 * i0), ykey1 = sin(key1 * i0);
-			double x0 = rr * xkey1, y0 = rr * ykey1; // 候補位置 (距離，方向)
-			b[i0].x = x0; 
-			b[i0].y = y0; // 表示用
-			double val1, val2;
-			get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
-			double val = val1 + val2 * 1.0;
-			fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
-			// できるだけ改良
-			int ii = improve(&x0, &y0, 100, data, sz);
-			c[i0].x = x0; 
-			c[i0].y = y0;
-			get_vals(&val1, &val2, x0, y0, data, sz);
-			val = val1 + val2 * 1.0;
-			fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
-			//重複させたくない処理
-			#pragma	omp critical
-			//#pragma omp single //←失敗
-			{ // これまでより良い評価なら，最良値の情報を更新
-				if (val < minval) {
-					x1 = x0; 
-					y1 = y0;
-					minval = val;
-					fprintf(stderr, "!:%d\n", i0);
+	#pragma omp parallel
+	{
+		double local_minval = minval;
+		double local_minval1 = minval1;
+		double local_x1=0, local_y1=0;
+
+		#pragma omp for
+		for (i0 = 0; i0 < ssz; i0++){ // 各候補位置について
+			if (judge_gettime() < MY_TIME_LIMIT){ // 時間が残っていれば処理
+				double ss = ss0 + ssa * i0;
+				ss = ss - (long long)ss;
+				ss = ss - (int)ss;    // 小数部分を残す (0から1)
+				double rr = sqrt(ss); // 中心からの距離，密度(面積あたり)を一定に
+				// 中心から方向を表す単位ベクトル (xkey1, ykey1)
+				double xkey1 = cos(key1 * i0), ykey1 = sin(key1 * i0);
+				double x0 = rr * xkey1, y0 = rr * ykey1; // 候補位置 (距離，方向)
+				b[i0].x = x0; 
+				b[i0].y = y0; // 表示用
+				double val1, val2;
+				get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
+				double val = val1 + val2 * 1.0;
+				fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+				// できるだけ改良
+				int ii = improve(&x0, &y0, 100, data, sz);
+				c[i0].x = x0; 
+				c[i0].y = y0;
+				get_vals(&val1, &val2, x0, y0, data, sz);
+				val = val1 + val2 * 1.0;
+				fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+				
+				{ // これまでより良い評価なら，最良値の情報を更新
+					if (val < local_minval) {
+						local_x1 = x0; 
+						local_y1 = y0;
+						local_minval = val;
+						fprintf(stderr, "!:%d\n", i0);
+					}
+					if (val1 < local_minval1) { // 評価値1 (のみ) についても参考までに
+						local_minval1 = val1;
+						fprintf(stderr, "?:%d\n", i0);
+					}
 				}
-				if (val1 < minval1) { // 評価値1 (のみ) についても参考までに
-					minval1 = val1;
-					fprintf(stderr, "?:%d\n", i0);
-				}
+			}
+		}
+
+		#pragma omp critical
+		{
+			// 各スレッドのローカル値を全体での最良値と比較して更新
+			if (local_minval < minval) {
+				minval = local_minval;
+				x1 = local_x1; 
+				y1 = local_y1;
+			}
+			if (local_minval1 < minval1) {
+				minval1 = local_minval1;
 			}
 		}
 	}
@@ -280,6 +298,7 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 			fprintf(stderr, "neib: %f, %f dist: %f\n", data[i].x, data[i].y, sqrt(r2));
 		}
 	}
+	
 	free(c);
 	free(b);
 	return r;
