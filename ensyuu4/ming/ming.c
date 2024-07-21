@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -210,12 +211,16 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	if (c == 0) return -2;
 	int i0;
 
+	int trial_count = 0;
+
 	//並列化処理
 	#pragma omp parallel
 	{
 		double local_minval = minval;
 		double local_minval1 = minval1;
 		double local_x1=0, local_y1=0;
+		int local_trial_count = 0;
+		double density_factor = 0.03;
 
 		#pragma omp for
 		for (i0 = 0; i0 < ssz; i0++){ // 各候補位置について
@@ -232,15 +237,17 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 				double val1, val2;
 				get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
 				double val = val1 + val2 * 1.0;
-				fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+				//fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
 				// できるだけ改良
 				int ii = improve(&x0, &y0, 100, data, sz);
 				c[i0].x = x0; 
 				c[i0].y = y0;
 				get_vals(&val1, &val2, x0, y0, data, sz);
 				val = val1 + val2 * 1.0;
-				fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+				//fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
 				
+				local_trial_count++;
+
 				// まず初期評価値で一定以下の場合にのみ改良を行う
                 if (val < minval * 1.5) { // 例として最良値の1.5倍以下とする
                     // できるだけ改良
@@ -249,19 +256,20 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
                     c[i0].y = y0;
                     get_vals(&val1, &val2, x0, y0, data, sz);
                     val = val1 + val2 * 1.0;
-                    fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+                    //fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
 
                     // これまでより良い評価なら，最良値の情報を更新
                     if (val < local_minval) {
                         local_x1 = x0;
                         local_y1 = y0;
                         local_minval = val;
-                        fprintf(stderr, "!:%d\n", i0);
+                        //fprintf(stderr, "!:%d\n", i0);
                     }
                     if (val1 < local_minval1) { // 評価値1 (のみ) についても参考までに
                         local_minval1 = val1;
-                        fprintf(stderr, "?:%d\n", i0);
+                        //fprintf(stderr, "?:%d\n", i0);
                     }
+					trial_count += local_trial_count;
                 }
 			}
 		}
@@ -289,6 +297,7 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 	get_vals(&val1, &val2, x1, y1, data, sz);
 	double val = val1 + val2 * 1.0;
 	fprintf(stderr, "min: (%f, %f) with %f %f %f\n", x1, y1, val, val1, val2);
+	fprintf(stderr, "Total trials: %d\n", trial_count); // 試行回数を出力
 
 	// PNG 生成 とりあえず標準出力に (ファイルをfopenする手もあるが)
 	int r = data_ans_to_png_img(stdout, x1, y1, c, ssz, b, ssz, data, sz);
