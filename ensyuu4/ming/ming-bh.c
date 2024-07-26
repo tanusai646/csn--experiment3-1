@@ -8,35 +8,6 @@
 /* 近すぎるときの発散防止 */
 #define EPARAM 1e-40
 
-//Barnes-Hutアルゴリズム用のデータ構造を追加
-typedef struct QuadNode {
-    double x, y;  // 中心座標
-    double mass;  // ノードの質量
-    struct QuadNode *children[4];  // 4つの子ノード
-    struct QuadNode *parent;  // 親ノード
-    struct xy *points;  // このノードに含まれる点
-    size_t num_points;  // 点の数
-	double x_min, x_max;  // ノードの領域の境界
-    double y_min, y_max;
-} QuadNode;
-
-QuadNode* create_quad_node(double x_min, double x_max, double y_min, double y_max){
-	QuadNode *node = (QuadNode *)malloc(sizeof(QuadNode));
-    node->x = 0.0;
-    node->y = 0.0;
-    node->mass = 0.0;
-    node->points = NULL;
-    node->num_points = 0;
-    node->x_min = x_min;
-    node->x_max = x_max;
-    node->y_min = y_min;
-    node->y_max = y_max;
-    for (int i = 0; i < 4; i++) {
-        node->children[i] = NULL;
-    }
-    return node;
-};
-
 ////////////////////////////////////////
 // 評価値を計算 (どちらも正となるように符号を考える)
 //   評価値1: 重力ポテンシャル(の総和)/総質量
@@ -92,27 +63,28 @@ static int get_vals(double *val1, double *val2, double x0, double y0, struct xy 
   ポテンシャルは使わず，加速度が0になるところを目指す
 */
 
-int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
-	// 候補位置
-	double x0 = *xp, y0 = *yp;
-	// 加速度ベクトル
-	double accelx = 0.0, accely = 0.0;
-	// 加速度ベクトルの勾配，2x2のヘッセ行列．2要素分は同じなので3要素で
-	double derivxx = 0.0, derivxy = 0.0, derivyy = 0.0;
-	// 更新量の大きさ^2，更新後候補位置の中心からの距離^2
-	double u2, nr2;
-	// 改良用反復の番号
-	int ii = 0;
-	//
-	double prev_val1 = 1e50, prev_val2 = 1e50;
+// 勾配降下法を使って候補位置 (*xp, *yp) をできるだけ改良．改良した回数を返す．最大 maxi回改良
+int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz) {
+    // 候補位置
+    double x0 = *xp, y0 = *yp;
+    // 勾配ベクトル
+    double gradx = 0.0, grady = 0.0;
+    // ステップサイズ
+    double step_size = 0.01;
+    double step_size_min = 1e-5; // 最小ステップサイズ
+    double step_size_max = 0.1;  // 最大ステップサイズ
+    // 更新量の大きさ^2，更新後候補位置の中心からの距離^2
+    double u2, nr2;
+    // 改良用反復の番号
+    int ii = 0;
+    // 前回の評価値
+    double prev_val1 = 1e50, prev_val2 = 1e50;
 
-	while (ii < maxi){
-      // 加速度ベクトルとその勾配を総和
-	#pragma omp parallel
+    while (ii < maxi) {
+        // 勾配を総和
+        #pragma omp parallel
         {
-            // 各スレッドのローカル変数を定義
-            double local_accelx = 0.0, local_accely = 0.0;
-            double local_derivxx = 0.0, local_derivxy = 0.0, local_derivyy = 0.0;
+            double local_gradx = 0.0, local_grady = 0.0;
 
             #pragma omp for
             for (size_t i = 0; i < sz; i++) {
@@ -125,101 +97,66 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
                 double r_1 = sqrt(r_2);
                 double r_3 = r_1 * r_2;
 
-                // 加速度ベクトルの総和
-                local_accelx += r_3 * x;
-                local_accely += r_3 * y;
-
-                // 加速度ベクトルの勾配の総和
-                local_derivxx += 3.0 * r_3 * (x2 * r_2 - 1.0 / 3.0);
-                local_derivxy += 3.0 * r_3 * x * y * r_2;
-                local_derivyy += 3.0 * r_3 * (y2 * r_2 - 1.0 / 3.0);
+                // 勾配の総和
+                local_gradx += r_3 * x;
+                local_grady += r_3 * y;
             }
 
             #pragma omp critical
             {
-                accelx += local_accelx;
-                accely += local_accely;
-                derivxx += local_derivxx;
-                derivxy += local_derivxy;
-                derivyy += local_derivyy;
+                gradx += local_gradx;
+                grady += local_grady;
             }
         }
-      // x0, y0 を更新．u2, nr2 によって打ち切るか決められるようにする
-    	{
-#if 0
-		fprintf(stderr, "pos=(%f,%f) on %d\n", x0, y0, ii);
-		fprintf(stderr, "accel=(%f,%f) on %d\n", accelx, accely, ii);
-		fprintf(stderr, "deriv=(%f,%f,%f) on %d\n", derivxx, derivxy, derivyy, ii);
-#endif
-		// 2x2 ヘッセ行列: a, b, c, d
-		double a = derivxx, b = derivxy, c = derivxy, d = derivyy;
-		// 行列式を用いて，逆行列を扱う
-		double det = a * d - b * c;
 
-		if(fabs(det) < 1e-20){
-			det = (det < 0 ? -1 : 1) * 1e-20;
-		}
+        // 勾配のノルムを計算
+        double grad_norm = sqrt(gradx * gradx + grady * grady);
 
-		// 加速度の総和を0にするための更新量を求める (ニュートン法)
-		double ux = - 1.0 / det * (  d * accelx - b * accely);
-		double uy = - 1.0 / det * (- c * accelx + a * accely);
-#if 0
-		fprintf(stderr, "update %f,%f\n", ux, uy);
-#endif
-		// 更新量の大きさ^2
-		u2 = ux * ux + uy * uy;
-
-        // ステップサイズのスケーリングファクタを計算
-        double scale = 1.0 / sqrt(u2);
-        double max_step = 0.1; // 最大ステップサイズを設定
-
-        if (scale > max_step) {
-            scale = max_step;
+        // 勾配が非常に小さい場合は収束とみなす
+        if (grad_norm < 1e-6) {
+            break;
         }
 
-		double nx = x0 + ux, ny = y0 + uy;
-		// 更新後候補位置の中心からの距離^2
-		nr2 = nx * nx + ny * ny;
-#if 0
-		double pax = accelx + a * (nx - x0) + b * (ny - y0);
-		double pay = accely + c * (nx - x0) + d * (ny - y0);
-		fprintf(stderr, "accelp=(%f,%f)\n", pax, pay);
-#endif
-		x0 = nx; 
-		y0 = ny;
-		if (nr2 > 1.0) { 
-			// 系の枠外 (中心からの距離が1を超える) なら，枠内ぎりぎりに
-			double nr_1 = sqrt(1.0 / nr2);
-			x0 = nx * nr_1; 
-			y0 = ny * nr_1;
-		}
-		// 次の反復へ． 
-		ii++;
-		// 次の反復で加速度ベクトルとその勾配を求める準備
-		accelx = 0.0; 
-		accely = 0.0;
-		derivxx = 0.0; 
-		derivxy = 0.0; 
-		derivyy = 0.0;
-		}
-		// u2, nr2 によって次の反復は実行せずに打ち切るか決める
-		if (nr2 > 1.0 || u2 < 1e-20){
-			break;
-		}
+        // ステップサイズの調整
+        step_size = fmin(fmax(step_size / grad_norm, step_size_min), step_size_max);
 
-		//早期に終了させる処理
-		double val1, val2;
+        // 勾配に基づいて更新
+        x0 -= step_size * gradx;
+        y0 -= step_size * grady;
+
+        // 更新量の大きさ^2
+        u2 = gradx * gradx + grady * grady;
+
+        // 更新後候補位置の中心からの距離^2
+        nr2 = x0 * x0 + y0 * y0;
+
+        // 系の枠外 (中心からの距離が1を超える) なら，枠内ぎりぎりに
+        if (nr2 > 1.0) {
+            double nr_1 = sqrt(1.0 / nr2);
+            x0 *= nr_1;
+            y0 *= nr_1;
+        }
+
+        // 次の反復へ
+        ii++;
+
+        // 次の反復で勾配を求める準備
+        gradx = 0.0;
+        grady = 0.0;
+
+        // 早期に終了させる処理
+        double val1, val2;
         get_vals(&val1, &val2, x0, y0, data, sz);
         if (fabs(val1 - prev_val1) < 1e-6 && fabs(val2 - prev_val2) < 1e-6) {
             break;  // Early stopping if improvement is very small
         }
         prev_val1 = val1;
         prev_val2 = val2;
-	}
+    }
 
-	*xp = x0; 
-	*yp = y0;
-	return ii;
+    *xp = x0;
+    *yp = y0;
+    return ii;
 }
 
 
@@ -266,39 +203,28 @@ int scanarea(int s, double key1, double key2, struct xy *data, size_t sz){
 				double val1, val2;
 				get_vals(&val1, &val2, x0, y0, data, sz); // 評価値を得る
 				double val = val1 + val2 * 1.0;
-				//fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+				fprintf(stderr, "*%d: (%f, %f) with %f %f %f\n", i0, x0, y0, val, val1, val2); // 初期評価値を表示
+				
 				// できるだけ改良
 				int ii = improve(&x0, &y0, 100, data, sz);
 				c[i0].x = x0; 
 				c[i0].y = y0;
 				get_vals(&val1, &val2, x0, y0, data, sz);
 				val = val1 + val2 * 1.0;
-				//fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+				fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
 				
 				local_trial_count++;
 
-				// まず初期評価値で一定以下の場合にのみ改良を行う
-                if (val < minval * 1.5) { // 例として最良値の1.5倍以下とする
-                    // できるだけ改良
-                    int ii = improve(&x0, &y0, 100, data, sz);
-                    c[i0].x = x0;
-                    c[i0].y = y0;
-                    get_vals(&val1, &val2, x0, y0, data, sz);
-                    val = val1 + val2 * 1.0;
-                    //fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n", i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
-
-                    // これまでより良い評価なら，最良値の情報を更新
-                    if (val < local_minval) {
-                        local_x1 = x0;
-                        local_y1 = y0;
-                        local_minval = val;
-                        //fprintf(stderr, "!:%d\n", i0);
-                    }
-                    if (val1 < local_minval1) { // 評価値1 (のみ) についても参考までに
-                        local_minval1 = val1;
-                        //fprintf(stderr, "?:%d\n", i0);
-                    }
-					trial_count += local_trial_count;
+                // これまでより良い評価なら，最良値の情報を更新
+                if (val < local_minval) {
+                    local_x1 = x0;
+                    local_y1 = y0;
+                    local_minval = val;
+                    fprintf(stderr, "!:%d\n", i0);
+                }
+                if (val1 < local_minval1) { // 評価値1 (のみ) についても参考までに
+                    local_minval1 = val1;
+                    fprintf(stderr, "?:%d\n", i0);
                 }
 			}
 		}

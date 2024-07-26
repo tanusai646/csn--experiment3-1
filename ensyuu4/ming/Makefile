@@ -1,10 +1,13 @@
-all: ming ming-mp
+all: ming ming-mp ming-mp-bh
 
 ming: ming.c mypng.o genpng.o judge.o
 	gcc -O3 ming.c mypng.o genpng.o judge.o -o ming -lm -lpng
 
 ming-mp: ming.c mypng.o genpng.o judge.o
 	gcc -O3 -fopenmp ming.c mypng.o genpng.o judge.o -o ming-mp -lm -lpng
+
+ming-mp-bh: ming-bh.c mypng.o genpng.o judge.o
+	gcc -O3 -fopenmp ming-bh.c mypng.o genpng.o judge.o -o ming-mp-bh -lm -lpng
 
 mypng.o: mypng.c mypng.h genpng.h xydata.h
 	gcc -O3 mypng.c -c
