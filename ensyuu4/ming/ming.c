@@ -140,13 +140,16 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 更新量の大きさ^2
 		u2 = ux * ux + uy * uy;
 
-        // ステップサイズのスケーリングファクタを計算
-        double scale = 1.0 / sqrt(u2);
-        double max_step = 0.1; // 最大ステップサイズを設定
+		double scale = 0.0001 * pow(u2, -0.5);
+		// スケールの値を制限
+		//if (scale < 0.05) scale = 0.05;
+		if(scale < 1e-6) scale = 0.4;
+		if (scale > 0.1) scale = 0.05;
 
-        if (scale > max_step) {
-            scale = max_step;
-        }
+		//fprintf(stderr,"scale: %f\n", scale);
+
+		ux = scale;
+		uy = scale;
 
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2
