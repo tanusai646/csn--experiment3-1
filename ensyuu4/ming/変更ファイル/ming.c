@@ -140,15 +140,22 @@ int improve(double *xp, double *yp, int maxi, struct xy *data, size_t sz){
 		// 更新量の大きさ^2
 		u2 = ux * ux + uy * uy;
 
-		double scale = 0.0001 * pow(u2, -0.5);
-		// スケールの値を制限
-		//if (scale < 0.05) scale = 0.05;
-		if(scale < 1e-6) scale = 0.4;
-		if (scale > 0.1) scale = 0.05;
-
-		//fprintf(stderr,"scale: %f\n", scale);
-		ux *= scale;
-		uy *= scale;
+		if (u2 > 1e-2)
+		{
+			ux *= 0.05; uy *= 0.05; // 更新量制限
+		}
+		else if (u2 > 1e-4)
+		{	      
+			ux *= 0.1; uy *= 0.1; // 更新量制限
+		}
+		else if (u2 > 1e-5)
+		{	      
+			ux *= 0.2; uy *= 0.2; // 更新量制限
+		}
+		else if (u2 > 1e-6)
+		{	      
+			ux *= 0.4; uy *= 0.4; // 更新量制限
+		}
 
 		double nx = x0 + ux, ny = y0 + uy;
 		// 更新後候補位置の中心からの距離^2

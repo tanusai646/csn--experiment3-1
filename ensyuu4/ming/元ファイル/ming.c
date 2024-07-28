@@ -161,6 +161,7 @@ scanarea(int s, double key1, double key2, struct xy *data, size_t sz)
   double minval = 1e+50;     // これまで最良の評価値
   double minval1 = 1e+50;    // これまで最良の評価値1
   double x1 = 0.0, y1 = 0.0; // これまで最良の位置
+  int count = 0;
   struct xy *b = (struct xy *)calloc(ssz, sizeof(struct xy)); // 改良前
   if (b == 0) return -2;
   struct xy *c = (struct xy *)calloc(ssz, sizeof(struct xy)); // 改良後
@@ -189,6 +190,7 @@ scanarea(int s, double key1, double key2, struct xy *data, size_t sz)
 	val = val1 + val2 * 1.0;
 	fprintf(stderr, ":%d(%d): (%f, %f) with %f %f %f\n",
 		i0, ii, x0, y0, val, val1, val2); // 改良後評価値を表示
+	count++;
 	{ // これまでより良い評価なら，最良値の情報を更新
 	  if (val < minval)
 	    {
@@ -216,6 +218,7 @@ scanarea(int s, double key1, double key2, struct xy *data, size_t sz)
 	  x1, y1, val, val1, val2);
   // PNG 生成 とりあえず標準出力に (ファイルをfopenする手もあるが)
   int r = data_ans_to_png_img(stdout, x1, y1, c, ssz, b, ssz, data, sz);
+  fprintf(stderr, "Total trials: %d\n", count); // 試行回数を出力
   // 近傍の点を表示
   size_t i;
   for (i = 0; i < sz; i++)

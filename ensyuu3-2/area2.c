@@ -13,7 +13,7 @@ double getArea(int n)
 {
   int i, j, s1;
   double x, y, s = 0.0, d2 = 0.5/n;
-#pragma omp parallel for private(j,x,y,s1) reduction(+:s)
+#pragma omp parallel for private(j,x,y,s1) reduction(+:s) schedule(dynamic,1)
   for (i = 0; i < n; i++) {
     y = (2 * i + 1) * d2;     // 正方形の中心 y座標
     s1 = 0;
